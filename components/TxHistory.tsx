@@ -1,14 +1,27 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { getTxHistory, TxRecord } from "@/lib/cardUtils";
+
 interface Props {
   smartAddress: string;
   limit?: number;
 }
 
 export default function TxHistory({ smartAddress, limit = 5 }: Props) {
-  // In production: fetch from Neynar/Blockscout API
-  // For now: show placeholder / empty state
-  const txs: { hash: string; type: string; amount: string; to: string; time: string; status: string }[] = [];
+  const [txs, setTxs] = useState<TxRecord[]>([]);
+
+  useEffect(() => {
+    setTxs(getTxHistory());
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "tranzo_tx_history") {
+        setTxs(getTxHistory());
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
 
   return (
     <div style={{
@@ -63,7 +76,7 @@ export default function TxHistory({ smartAddress, limit = 5 }: Props) {
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 14, fontWeight: 600 }}>
-                {tx.type === "send" ? "Sent" : "Received"}
+                {tx.merchant ? tx.merchant : (tx.type === "send" ? "Sent" : "Received")}
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
                 {tx.time}
