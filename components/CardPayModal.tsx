@@ -49,18 +49,6 @@ export default function CardPayModal({ onClose }: Props) {
       localStorage.setItem("tranzo_last_tx", JSON.stringify(event));
       window.dispatchEvent(new StorageEvent("storage", { key: "tranzo_last_tx" }));
       
-      // Save locally to wallet transaction history
-      import("@/lib/cardUtils").then(({ addTxHistory }) => {
-        addTxHistory({
-          hash: userOpHash,
-          type: "send",
-          amount: payAmt,
-          to: toAddr,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          status: "confirmed",
-          merchant: selected.name
-        });
-      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message.slice(0, 250) : "Payment failed");
       setStep("declined");

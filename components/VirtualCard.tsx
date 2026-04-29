@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useWallet } from "@/lib/WalletContext";
 import CardPayModal from "@/components/CardPayModal";
 import CardActivateModal from "@/components/CardActivateModal";
-import { generateCardDetails, getAccumulatedSpend } from "@/lib/cardUtils";
+import { getAccumulatedSpend } from "@/lib/cardUtils";
 
 interface Props { smartAddress: string; }
 
@@ -15,24 +15,88 @@ export default function VirtualCard({ smartAddress }: Props) {
   const [showActivate, setShowActivate] = useState(false);
   const [showCvv, setShowCvv] = useState(false);
   const [spent, setSpent] = useState(0);
+  const [isFrozen, setIsFrozen] = useState(false);
+  const [isTogglingFreeze, setIsTogglingFreeze] = useState(false);
 
-  // Generate deterministic card details from address
-  const cardDetails = useMemo(() => generateCardDetails(smartAddress), [smartAddress]);
+  const [cardDetails, setCardDetails] = useState({ number: "•••• •••• •••• ••••", cvv: "•••", name: "TRANZO USER", expiry: "12/28" });
 
   useEffect(() => {
-    // Update total spent when component mounts or tab switches
-    setSpent(getAccumulatedSpend());
-    
+    if (!smartAddress) return;
+    fetch(`/api/cards?smartAddress=${smartAddress}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.card) {
+          setCardDetails({
+            number: data.card.cardNumber || "•••• •••• •••• ••••",
+            cvv: data.card.cvv || "•••",
+            name: "TRANZO USER",
+            expiry: "12/28"
+          });
+          setIsFrozen(data.card.state === "PAUSED");
+        }
+      }).catch(console.error);
+  }, [smartAddress, isCardActive]);
+
+  useEffect(() => {
+    if (!smartAddress) return;
+
+    const fetchSpend = async () => {
+      try {
+        const res = await fetch(`/api/transactions?smartAddress=${smartAddress}`);
+        const data = await res.json();
+        if (data.transactions) {
+          // Calculate sum of today's spend
+          const today = new Date().toDateString();
+          // The API returns time as e.g. "05:30 PM", we just sum them all up for the demo
+          // In a real app we'd filter by exact Date
+          const sum = data.transactions
+            .filter((tx: any) => tx.type === "send")
+            .reduce((acc: number, tx: any) => acc + parseFloat(tx.amount), 0);
+          setSpent(sum);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    fetchSpend();
+
     // Listen for new transactions to update gauge real-time
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === "tranzo_tx_history") setSpent(getAccumulatedSpend());
+      if (e.key === "tranzo_last_tx" || e.key === "tranzo_tx_history") {
+        fetchSpend();
+      }
     };
     window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, []);
+    const interval = setInterval(fetchSpend, 5000);
+    
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      clearInterval(interval);
+    };
+  }, [smartAddress]);
 
   const limitNum = parseFloat(cardSpendLimit) || 0;
   const progressPct = limitNum > 0 ? Math.min((spent / limitNum) * 100, 100) : 0;
+
+  const toggleFreeze = async () => {
+    setIsTogglingFreeze(true);
+    try {
+      const newState = isFrozen ? "OPEN" : "PAUSED";
+      const res = await fetch("/api/cards/state", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ smartAddress, state: newState }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsFrozen(data.card.state === "PAUSED");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    setIsTogglingFreeze(false);
+  };
 
   return (
     <>
@@ -74,7 +138,7 @@ export default function VirtualCard({ smartAddress }: Props) {
               <div>
                 <div style={{ fontSize: 20, fontWeight: 900, color: "#fff", letterSpacing: "2px" }}>TRANZO</div>
                 <div style={{ fontSize: 9, color: "rgba(255,255,255,0.5)", letterSpacing: "1px", marginTop: 2 }}>
-                  {isCardActive ? "CARD ACTIVE · SESSION KEY ON" : "CRYPTO CARD · INACTIVE"}
+                  {isFrozen ? "❄️ CARD PAUSED" : isCardActive ? "CARD ACTIVE · SESSION KEY ON" : "CRYPTO CARD · INACTIVE"}
                 </div>
               </div>
               <div style={{ textAlign: "center" }}>
@@ -174,7 +238,42 @@ export default function VirtualCard({ smartAddress }: Props) {
             </button>
           </div>
 
+          {/* Freeze Card Toggle (Lithic Level) */}
           {isCardActive && (
+            <div style={{ padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border)", background: isFrozen ? "rgba(14,165,233,0.05)" : "transparent" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 18 }}>❄️</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: isFrozen ? "#0ea5e9" : "var(--text-primary)" }}>Freeze Card</span>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                  {isFrozen ? "Card paused. Transactions will be declined." : "Temporarily pause your card."}
+                </div>
+              </div>
+              
+              <button 
+                onClick={toggleFreeze}
+                disabled={isTogglingFreeze}
+                style={{
+                  width: 50, height: 28, borderRadius: 14,
+                  background: isFrozen ? "#0ea5e9" : "var(--bg-elevated)",
+                  border: isFrozen ? "none" : "1px solid var(--border)", 
+                  position: "relative", cursor: "pointer",
+                  transition: "background 0.3s",
+                  opacity: isTogglingFreeze ? 0.5 : 1
+                }}
+              >
+                <div style={{
+                  width: 22, height: 22, borderRadius: "50%", background: "#fff",
+                  position: "absolute", top: 2, left: isFrozen ? 24 : 2,
+                  transition: "left 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
+                }} />
+              </button>
+            </div>
+          )}
+
+          {isCardActive && !isFrozen && (
             <>
               {/* Spending Gauge & Edit Limit */}
               <div style={{ padding: "16px", borderBottom: "1px solid var(--border)", background: "rgba(0,0,0,0.1)" }}>
@@ -229,6 +328,15 @@ export default function VirtualCard({ smartAddress }: Props) {
                 </button>
               </div>
             </>
+          )}
+
+          {/* Message when frozen */}
+          {isCardActive && isFrozen && (
+            <div style={{ padding: "20px", textAlign: "center", background: "rgba(14,165,233,0.05)" }}>
+              <div style={{ fontSize: 24, marginBottom: 8 }}>🧊</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#0ea5e9", marginBottom: 4 }}>Card is Frozen</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Unfreeze your card to tap and pay.</div>
+            </div>
           )}
         </div>
 

@@ -13,6 +13,14 @@
       "smartAddress": "0xfBa96c74b9572C55c98aCC4B973a252E946F4390",
       "sessionKeyPK": "0xa15e4a0611f3b5a93c19c8ad29f7d8c849b8099ea21fab211e52beb37f03295c",
       "spendLimit": "0.005"
+    },
+    {
+      "cardNumber": "4111111650609061",
+      "cvv": "536",
+      "token": "b86c1909-af9e-4989-b7ab-1e458c06317f",
+      "smartAddress": "0xFA335E37a084D3F88d2410830E6125Fb992A0c58",
+      "sessionKeyPK": "0x1fd8b0e1018363eb15b344d9cb7083396f70c676390820ea928398e40d697a91",
+      "spendLimit": "0.05"
     }
   ]
 }

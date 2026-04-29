@@ -12,16 +12,37 @@ export default function TxHistory({ smartAddress, limit = 5 }: Props) {
   const [txs, setTxs] = useState<TxRecord[]>([]);
 
   useEffect(() => {
-    setTxs(getTxHistory());
+    if (!smartAddress) return;
+    
+    const fetchTxs = async () => {
+      try {
+        const res = await fetch(`/api/transactions?smartAddress=${smartAddress}`);
+        const data = await res.json();
+        if (data.transactions) {
+          setTxs(data.transactions);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
 
+    fetchTxs();
+
+    // Listen for storage events (e.g. from Demo Store checkout) to trigger a refresh
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === "tranzo_tx_history") {
-        setTxs(getTxHistory());
+      if (e.key === "tranzo_last_tx" || e.key === "tranzo_tx_history") {
+        fetchTxs();
       }
     };
     window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, []);
+    // Periodically refresh (optional, but good for demo)
+    const interval = setInterval(fetchTxs, 5000);
+    
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      clearInterval(interval);
+    };
+  }, [smartAddress]);
 
   return (
     <div style={{

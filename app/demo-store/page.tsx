@@ -15,7 +15,7 @@ const PRODUCTS = [
 // Merchant wallet (receives the ETH on-chain)
 const MERCHANT_ADDR = "0x033D986709c6c794C42a1259A8baeb6693de9444" as `0x${string}`;
 
-type PageStep = "shop" | "checkout" | "processing" | "success" | "failed";
+type PageStep = "shop" | "checkout" | "3ds_challenge" | "processing" | "success" | "failed";
 
 export default function DemoStorePage() {
   const [step, setStep] = useState<PageStep>("shop");
@@ -28,6 +28,11 @@ export default function DemoStorePage() {
   const [cardName, setCardName]     = useState("");
   const [expiry, setExpiry]         = useState("");
   const [cvv, setCvv]               = useState("");
+
+  // 3DS State
+  const [threeDSToken, setThreeDSToken] = useState("");
+  const [otp, setOtp] = useState("");
+  const [savedPaymentInfo, setSavedPaymentInfo] = useState<any>(null);
 
   async function handlePay(e: React.FormEvent) {
     e.preventDefault();
@@ -47,24 +52,70 @@ export default function DemoStorePage() {
         throw new Error(dbResponse.error || "Card declined. Invalid details.");
       }
 
-      const { smartAddress, sessionKeyPK, spendLimit } = dbResponse.card;
+      if (dbResponse.card.state === "PAUSED") {
+        throw new Error("Transaction declined. Card is frozen.");
+      }
 
-      // 2. Process On-Chain Payment anonymously! 
-      const { sendCardPayment } = await import("@/lib/wallet");
+      const { smartAddress, sessionKeyPK, spendLimit } = dbResponse.card;
+      setSavedPaymentInfo({ smartAddress, sessionKeyPK, spendLimit });
+
+      // 2. Trigger 3DS Simulation via Lithic
+      const sim3ds = await fetch("/api/3ds/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pan: cardNumber, amount: selectedProduct.price })
+      });
+      const data3ds = await sim3ds.json();
       
-      const { userOpHash } = await sendCardPayment(
-        smartAddress as `0x${string}`,
-        sessionKeyPK,
-        MERCHANT_ADDR,
-        parseEther(selectedProduct.price),
-        spendLimit,
-      );
+      if (!sim3ds.ok) {
+        throw new Error(data3ds.error || "3DS authentication failed");
+      }
+
+      setThreeDSToken(data3ds.token);
+      setStep("3ds_challenge");
+
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message.slice(0, 400) : "Payment failed");
+      setStep("failed");
+    }
+  }
+
+  async function verify3DS(e: React.FormEvent) {
+    e.preventDefault();
+    setStep("processing");
+    setError("");
+
+    try {
+      // Verify OTP
+      const verifyRes = await fetch("/api/3ds/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: threeDSToken, otp })
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok) throw new Error(verifyData.error || "OTP verification failed");
+
+      // 3. Process Lithic Authorization
+      const simRes = await fetch("/api/simulate-transaction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cardNumber, amount: selectedProduct.price })
+      });
+      const simData = await simRes.json();
+      
+      if (!simRes.ok) {
+        throw new Error(simData.error || "Lithic Authorization failed");
+      }
+
+      // The backend handles the ZeroDev on-chain payment entirely autonomously
+      // via the Lithic Webhook (or fallback simulator).
+      const userOpHash = simData.userOpHash || "0x_webhook_processed";
 
       setTxHash(userOpHash);
       setStep("success");
 
       // Fire event for card-network page (Demo purposes)
-      const event = { merchant: "🛍️ ShopDemo Store", amount: selectedProduct.price, from: smartAddress, to: MERCHANT_ADDR, hash: userOpHash, ts: Date.now() };
+      const event = { merchant: "🛍️ ShopDemo Store", amount: selectedProduct.price, from: savedPaymentInfo.smartAddress, to: MERCHANT_ADDR, hash: userOpHash, ts: Date.now() };
       localStorage.setItem("tranzo_last_tx", JSON.stringify(event));
       window.dispatchEvent(new StorageEvent("storage", { key: "tranzo_last_tx" }));
       
@@ -320,13 +371,49 @@ export default function DemoStorePage() {
               <div style={{ fontSize: 14, color: "#64748b", marginTop: 6 }}>Session key signing · ZeroDev bundling...</div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
-              {["Authorizing card...", "Session key signing...", "Broadcasting UserOp...", "Waiting for on-chain confirm..."].map((s, i) => (
+              {["Authenticating 3DS...", "Authorizing card via Lithic...", "Session key signing...", "Broadcasting UserOp...", "Waiting for on-chain confirm..."].map((s, i) => (
                 <div key={s} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
                   <div style={{ width: 18, height: 18, borderRadius: "50%", background: "rgba(124,58,237,0.12)", border: "1.5px solid #7c3aed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#7c3aed", flexShrink: 0 }}>✓</div>
                   <span style={{ fontSize: 13, color: "#0f172a" }}>{s}</span>
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* ── 3DS CHALLENGE ── */}
+        {step === "3ds_challenge" && (
+          <div style={{ maxWidth: 480, margin: "60px auto", textAlign: "center", background: "#fff", borderRadius: 20, padding: 32, boxShadow: "0 8px 30px rgba(0,0,0,0.08)", border: "1px solid #e2e8f0" }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>🛡️</div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, color: "#0f172a" }}>3D Secure Verification</h2>
+            <p style={{ fontSize: 14, color: "#64748b", marginTop: 8, lineHeight: 1.5 }}>
+              To protect against fraud, please enter the One-Time Password (OTP) sent to your registered device.
+            </p>
+            <div style={{ background: "#f8fafc", padding: "12px", borderRadius: 8, marginTop: 16, fontSize: 13, color: "#475569", border: "1px solid #e2e8f0" }}>
+              <strong>Demo Hint:</strong> Enter <strong>123456</strong>
+            </div>
+
+            <form onSubmit={verify3DS} style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+              <input
+                value={otp}
+                onChange={e => setOtp(e.target.value)}
+                placeholder="Enter 6-digit OTP"
+                maxLength={6}
+                style={{ width: "100%", padding: "14px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 18, fontWeight: 700, textAlign: "center", letterSpacing: "4px" }}
+                autoFocus
+              />
+              <button
+                type="submit"
+                style={{
+                  padding: "16px", borderRadius: 12,
+                  background: "#0f172a", color: "#fff",
+                  fontSize: 16, fontWeight: 700,
+                  cursor: "pointer", border: "none",
+                }}
+              >
+                Verify & Pay
+              </button>
+            </form>
           </div>
         )}
 

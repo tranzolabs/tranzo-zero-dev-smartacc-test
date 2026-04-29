@@ -169,15 +169,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setIsCardActive(true);
       setCardSpendLimit(limitEth);
 
-      // Register the deterministic card in the "Backend Network"
+      // Register the card in the "Backend Network" (Lithic)
       if (smartAddress) {
-        const { number, cvv } = generateCardDetails(smartAddress);
         await fetch("/api/cards", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            cardNumber: number,
-            cvv,
             smartAddress,
             sessionKeyPK,
             spendLimit: limitEth

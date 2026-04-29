@@ -204,6 +204,22 @@ export default function SettingsModal({ onClose }: Props) {
             </div>
           )}
 
+          {/* Developer Dashboard Link */}
+          <a
+            href="/developer"
+            target="_blank"
+            style={{
+              display: "block", textAlign: "center", textDecoration: "none",
+              padding: "14px", borderRadius: "var(--radius-md)",
+              background: "rgba(59,130,246,0.1)",
+              border: "1px solid rgba(59,130,246,0.3)",
+              color: "#3b82f6", fontSize: 14, fontWeight: 700,
+              marginTop: 4,
+            }}
+          >
+            👨‍💻 Open Developer Dashboard
+          </a>
+
           {/* Disconnect */}
           <button
             id="btn-disconnect-settings"
